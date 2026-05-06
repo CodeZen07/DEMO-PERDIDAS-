@@ -4,90 +4,106 @@ import plotly.express as px
 import folium
 from streamlit_folium import st_folium
 
-# 1. CONFIGURACIÓN VISUAL GERENCIAL
-st.set_page_config(page_title="PuntoRojo v3.0 | Distrito Nacional", layout="wide", page_icon="🔴")
+# 1. CONFIGURACIÓN DE INTERFAZ PROFESIONAL
+st.set_page_config(page_title="PuntoRojo v3.0 | Gestión de Pérdidas", layout="wide", page_icon="🔴")
 
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; border-top: 4px solid #ff4b4b; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-top: 4px solid #ff4b4b; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. CARGA DE DATOS CON CACHÉ PARA VELOCIDAD
+# 2. FUNCIÓN PARA PROCESAR EL ARCHIVO EXCEL Y CRUZAR DATOS
 @st.cache_data
-def cargar_datos(archivo):
-    xls = pd.ExcelFile(archivo)
-    
-    # Balance Central: Análisis de totalizadores
-    df_bal = pd.read_excel(xls, sheet_name="Balance Central")
-    df_bal.columns = [str(c).strip().upper() for c in df_bal.columns]
-    
-    # Relación: Mapeo Totalizador -> NIC
-    df_rel = pd.read_excel(xls, sheet_name="Relación")
-    df_rel.columns = [str(c).strip().upper() for c in df_rel.columns]
-    
-    # BDG: Información del cliente
-    sheet_bdg = next((s for s in xls.sheet_names if "bdg" in s.lower()), None)
-    df_bdg = pd.read_excel(xls, sheet_name=sheet_bdg) if sheet_bdg else None
-    if df_bdg is not None:
-        df_bdg.columns = [str(c).strip().upper() for c in df_bdg.columns]
-        df_bdg['NIC'] = df_bdg['NIC'].astype(str)
+def procesar_excel_gerencial(file):
+    try:
+        xls = pd.ExcelFile(file)
         
-    return df_bal, df_rel, df_bdg
-
-# 3. CUERPO DE LA APP
-st.title("🔴 PuntoRojo v3.0 — Dashboard Operativo")
-st.sidebar.header("Carga de Archivos")
-
-archivo_subido = st.sidebar.file_uploader("Subir reporte de balances (.xlsx)", type="xlsx")
-
-if archivo_subido:
-    df_bal, df_rel, df_bdg = cargar_datos(archivo_subido)
-    
-    # Limpieza de valores de pérdida
-    df_bal['%PÉRDIDA'] = pd.to_numeric(df_bal['%PÉRDIDA'], errors='coerce').fillna(0)
-    df_bal['PÉRDIDA'] = pd.to_numeric(df_bal['PÉRDIDA'], errors='coerce').fillna(0)
-
-    # --- FILA 1: PRIORIDADES Y GRÁFICO ---
-    col_izq, col_der = st.columns([1, 1])
-
-    with col_izq:
-        st.subheader("⚠️ Top 10 Totalizadores a Intervenir")
-        df_prioridad = df_bal.sort_values(by='%PÉRDIDA', ascending=False).head(10)
-        st.dataframe(df_prioridad[['TOTALIZADOR', 'CIRCUITO', '%PÉRDIDA', 'COMPRA']], use_container_width=True)
-
-    with col_der:
-        st.subheader("📊 Distribución de Pérdidas por Circuito")
-        fig = px.pie(df_bal, values='PÉRDIDA', names='CIRCUITO', hole=0.4,
-                     color_discrete_sequence=px.colors.sequential.Reds_r)
-        st.plotly_chart(fig, use_container_width=True)
-
-    # --- FILA 2: MAPA DN ---
-    st.subheader("📍 Mapa de Calor: Distrito Nacional")
-    mapa = folium.Map(location=[18.4861, -69.9312], zoom_start=12, tiles="cartodbpositron")
-    folium.Circle([18.4861, -69.9312], radius=4500, color="red", fill=True, opacity=0.3, popup="Zona Crítica DN").add_to(mapa)
-    st_folium(mapa, width=1300, height=400)
-
-    # --- FILA 3: BUSCADOR ASOCIADO ---
-    st.divider()
-    st.subheader("🔍 Consulta de Suministros por Totalizador")
-    totalizador_sel = st.selectbox("Seleccione el Totalizador:", df_bal['TOTALIZADOR'].unique())
-
-    if totalizador_sel:
-        # Cruce Relación + BDG
-        nics_en_red = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]
-        nics_en_red['NIC'] = nics_en_red['NIC'].astype(str)
+        # Carga de Balance Central (Lista de Totalizadores)
+        df_bal = pd.read_excel(xls, sheet_name="Balance Central")
+        df_bal.columns = [str(c).strip().upper() for c in df_bal.columns]
         
+        # Carga de Relación (Puente Totalizador -> NIC)
+        df_rel = pd.read_excel(xls, sheet_name="Relación")
+        df_rel.columns = [str(c).strip().upper() for c in df_rel.columns]
+        
+        # Carga de BDG (Datos del cliente)
+        nombre_bdg = next((s for s in xls.sheet_names if "bdg" in s.lower()), None)
+        df_bdg = pd.read_excel(xls, sheet_name=nombre_bdg) if nombre_bdg else None
         if df_bdg is not None:
-            detalle = pd.merge(nics_en_red, df_bdg[['NIC', 'NOMBRE', 'ESTADO', 'BALANCE', 'CORTABLE']], on='NIC', how='left')
+            df_bdg.columns = [str(c).strip().upper() for c in df_bdg.columns]
+            df_bdg['NIC'] = df_bdg['NIC'].astype(str)
+            df_bdg['BALANCE'] = pd.to_numeric(df_bdg['BALANCE'], errors='coerce').fillna(0)
             
-            # Indicadores del totalizador
-            m1, m2 = st.columns(2)
-            m1.metric("Clientes en esta red", len(detalle))
-            m2.metric("Deuda Acumulada", f"${detalle['BALANCE'].sum():,.2f}")
+        return df_bal, df_rel, df_bdg
+    except Exception as e:
+        st.error(f"Error al leer el archivo: {e}")
+        return None, None, None
+
+# 3. INTERFAZ PRINCIPAL
+st.title("🔴 PuntoRojo v3.0: Control de Pérdidas Distrito Nacional")
+st.sidebar.header("Carga de Datos")
+
+# --- FUNCIÓN DE SUBIDA DE ARCHIVO ---
+archivo_excel = st.sidebar.file_uploader("Subir Balance de Totalizadores (.xlsx)", type=["xlsx"])
+
+if archivo_excel:
+    df_bal, df_rel, df_bdg = procesar_excel_gerencial(archivo_excel)
+    
+    if df_bal is not None:
+        # Asegurar datos numéricos para el análisis
+        df_bal['%PÉRDIDA'] = pd.to_numeric(df_bal['%PÉRDIDA'], errors='coerce').fillna(0)
+        df_bal['PÉRDIDA'] = pd.to_numeric(df_bal['PÉRDIDA'], errors='coerce').fillna(0)
+
+        # --- FILA 1: KPIs Y GRÁFICO DE PRIORIDADES ---
+        col_tabla, col_grafico = st.columns([1, 1])
+        
+        with col_tabla:
+            st.subheader("⚠️ Top 10 Prioridades de Intervención")
+            df_prioridad = df_bal.sort_values(by='%PÉRDIDA', ascending=False).head(10)
+            st.dataframe(df_prioridad[['TOTALIZADOR', 'CIRCUITO', '%PÉRDIDA', 'PÉRDIDA']], use_container_width=True)
+
+        with col_grafico:
+            st.subheader("📊 Distribución de Pérdidas por Circuito")
+            fig = px.pie(df_bal, values='PÉRDIDA', names='CIRCUITO', hole=0.4,
+                         color_discrete_sequence=px.colors.sequential.Reds_r)
+            st.plotly_chart(fig, use_container_width=True)
+
+        # --- FILA 2: MAPA OPERATIVO ---
+        st.subheader("📍 Localización Estratégica (DN y Santo Domingo Este)")
+        # Coordenadas base para el mapa
+        m = folium.Map(location=[18.4861, -69.9312], zoom_start=12, tiles="cartodbpositron")
+        folium.Circle([18.4861, -69.9312], radius=4000, color="red", fill=True, popup="Foco de Pérdida DN").add_to(m)
+        st_folium(m, width=1300, height=400)
+
+        # --- FILA 3: BUSCADOR Y CRUCE AUTOMÁTICO ---
+        st.divider()
+        st.subheader("🔍 Buscador de Suministros por Totalizador")
+        
+        opciones_totalizador = df_bal['TOTALIZADOR'].unique()
+        totalizador_sel = st.selectbox("Seleccione un Totalizador para ver los suministros asociados:", opciones_totalizador)
+
+        if totalizador_sel:
+            # Cruce en tiempo real: Relación -> BDG
+            nics_asociados = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]
+            nics_asociados['NIC'] = nics_asociados['NIC'].astype(str)
             
-            st.dataframe(detalle, use_container_width=True)
+            if df_bdg is not None:
+                # Cruce de información gerencial (Deuda y Estado)
+                detalle_final = pd.merge(nics_asociados, 
+                                        df_bdg[['NIC', 'NOMBRE', 'ESTADO', 'BALANCE', 'CORTABLE']], 
+                                        on='NIC', how='left')
+                
+                # Resumen rápido del totalizador seleccionado
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Suministros", len(detalle_final))
+                c2.metric("Deuda Acumulada en Red", f"${detalle_final['BALANCE'].sum():,.2f}")
+                c3.metric("Intervención Sugerida", "Técnica/Corte" if detalle_final['BALANCE'].sum() > 50000 else "Inspección")
+                
+                st.dataframe(detalle_final, use_container_width=True)
+            else:
+                st.dataframe(nics_asociados, use_container_width=True)
 
 else:
-    st.info("Cargue el archivo Excel para iniciar el cruce de información gerencial.")
+    st.info("👋 Bienvenido. Por favor, suba el archivo Excel en el panel de la izquierda para generar el análisis.")
