@@ -4,29 +4,34 @@ import plotly.express as px
 import folium
 from streamlit_folium import st_folium
 
-# 1. CONFIGURACIÓN DE PÁGINA (Debe ser lo primero)
+# 1. CONFIGURACIÓN PROFESIONAL
 st.set_page_config(page_title="PuntoRojo v3.0 | Distrito Nacional", layout="wide", page_icon="🔴")
 
-# Estilo para KPIs gerenciales
+# Estilos CSS para mejorar la apariencia gerencial
 st.markdown("""
     <style>
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .main { background-color: #f8f9fa; }
+    .stMetric { 
+        background-color: #ffffff; 
+        padding: 20px; 
+        border-radius: 12px; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+        border-top: 5px solid #ff4b4b; 
+    }
+    .stDataFrame { border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. FUNCIONES DE PROCESAMIENTO
+# 2. FUNCIONES DE PROCESAMIENTO (Mantenemos tu lógica intacta)
 @st.cache_data
-def cargar_todo(archivo):
+def cargar_y_cruzar(archivo):
     xls = pd.ExcelFile(archivo)
-    
-    # Lectura de pestañas clave
     df_bal = pd.read_excel(xls, sheet_name="Balance Central")
     df_bal.columns = [str(c).strip().upper() for c in df_bal.columns]
     
     df_rel = pd.read_excel(xls, sheet_name="Relación")
     df_rel.columns = [str(c).strip().upper() for c in df_rel.columns]
     
-    # Buscar la BDG dinámicamente
     nombre_bdg = next((s for s in xls.sheet_names if "bdg" in s.lower()), None)
     df_bdg = pd.read_excel(xls, sheet_name=nombre_bdg) if nombre_bdg else None
     if df_bdg is not None:
@@ -36,73 +41,79 @@ def cargar_todo(archivo):
     
     return df_bal, df_rel, df_bdg
 
-# 3. INTERFAZ DE USUARIO - ESTO ES LO QUE "SALE" EN PANTALLA
-st.title("🔴 PuntoRojo v3.0: Gestión Estratégica de Pérdidas")
-st.markdown("---")
-
-# --- BOTÓN DE SUBIDA (VISIBLE SIEMPRE EN LA BARRA LATERAL) ---
-st.sidebar.header("Panel de Datos")
+# 3. CUERPO DE LA APP
+st.title("🔴 PuntoRojo v3.0: Control Estratégico de Pérdidas")
+st.sidebar.header("📥 Entrada de Datos")
 uploaded_file = st.sidebar.file_uploader("Subir Balance de Totalizadores (.xlsx)", type=["xlsx"])
 
-# Lógica si el archivo existe
 if uploaded_file:
-    # Procesar datos
-    df_bal, df_rel, df_bdg = cargar_todo(uploaded_file)
+    df_bal, df_rel, df_bdg = cargar_y_cruzar(uploaded_file)
     
-    # Limpieza básica para gráficos
+    # Cálculos rápidos
     df_bal['%PÉRDIDA'] = pd.to_numeric(df_bal['%PÉRDIDA'], errors='coerce').fillna(0)
     df_bal['PÉRDIDA'] = pd.to_numeric(df_bal['PÉRDIDA'], errors='coerce').fillna(0)
-
-    # SECCIÓN 1: PRIORIDADES Y PASTEL
-    col1, col2 = st.columns([1, 1])
     
-    with col1:
-        st.subheader("⚠️ Top 10 Totalizadores Críticos")
-        # Lista de prioridades para intervención inmediata
-        df_prioridad = df_bal.sort_values(by='%PÉRDIDA', ascending=False).head(10)
-        st.dataframe(df_prioridad[['TOTALIZADOR', 'CIRCUITO', '%PÉRDIDA', 'COMPRA']], use_container_width=True)
+    # --- MEJORA: MÉTRICAS FLASH ---
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Pérdida Promedio", f"{df_bal['%PÉRDIDA'].mean():.2f}%")
+    m2.metric("Totalizadores Críticos", len(df_bal[df_bal['%PÉRDIDA'] > 30]))
+    m3.metric("Energía Perdida Total", f"{df_bal['PÉRDIDA'].sum():,.0f} kWh")
+    m4.metric("Circuito Más Crítico", df_bal.groupby('CIRCUITO')['PÉRDIDA'].sum().idxmax())
 
-    with col2:
-        st.subheader("📊 Pérdidas por Circuito")
-        # Gráfico de pastel para ver la mayor pérdida localizada
-        fig_pie = px.pie(df_bal, values='PÉRDIDA', names='CIRCUITO', hole=0.4,
+    # --- TABS PARA ORGANIZAR EL TRABAJO ---
+    tab_prioridad, tab_mapa, tab_detalle = st.tabs(["🚀 Plan de Acción", "📍 Georreferencia", "🔍 Auditoría de Red"])
+
+    with tab_prioridad:
+        col_list, col_pie = st.columns([1, 1])
+        with col_list:
+            st.subheader("Top 10 Intervenciones Prioritarias")
+            df_prioridad = df_bal.sort_values(by='%PÉRDIDA', ascending=False).head(10)
+            st.table(df_prioridad[['TOTALIZADOR', 'CIRCUITO', '%PÉRDIDA']])
+            
+            # MEJORA: Botón de descarga de prioridades
+            csv = df_prioridad.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Descargar Plan de Intervención", csv, "prioridades_punto_rojo.csv", "text/csv")
+
+        with col_pie:
+            st.subheader("Pérdidas por Circuito")
+            fig = px.pie(df_bal, values='PÉRDIDA', names='CIRCUITO', hole=0.5, 
                          color_discrete_sequence=px.colors.sequential.Reds_r)
-        st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
-    # SECCIÓN 2: MAPA DISTRITO NACIONAL
-    st.subheader("📍 Localización Operativa (DN y SDE)")
-    m = folium.Map(location=[18.4861, -69.9312], zoom_start=12, tiles="cartodbpositron")
-    folium.Circle([18.4861, -69.9312], radius=4000, color="red", fill=True, popup="DN Central").add_to(m)
-    st_folium(m, width=1300, height=400)
+    with tab_mapa:
+        st.subheader("Foco de Operaciones: Distrito Nacional")
+        m = folium.Map(location=[18.4861, -69.9312], zoom_start=12, tiles="cartodbpositron")
+        # Marcamos las subestaciones o áreas críticas
+        folium.Circle([18.4861, -69.9312], radius=4000, color="red", fill=True, opacity=0.3).add_to(m)
+        st_folium(m, width=1200, height=450)
 
-    # SECCIÓN 3: FILTRO Y CRUCE AUTOMÁTICO
-    st.divider()
-    st.subheader("🔍 Buscador de Suministros por Totalizador")
-    
-    totalizador_sel = st.selectbox("Seleccione un Totalizador para ver sus NICs:", df_bal['TOTALIZADOR'].unique())
-
-    if totalizador_sel:
-        # Cruce Relación + BDG
-        nics_en_totalizador = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]
-        nics_en_totalizador['NIC'] = nics_en_totalizador['NIC'].astype(str)
+    with tab_detalle:
+        st.subheader("Explorador de Suministros por Totalizador")
+        totalizador_sel = st.selectbox("Seleccione el Totalizador para auditar:", df_bal['TOTALIZADOR'].unique())
         
-        if df_bdg is not None:
-            # Traer Balance y Estado de la BDG al reporte del totalizador
-            final = pd.merge(nics_en_totalizador, 
-                             df_bdg[['NIC', 'NOMBRE', 'ESTADO', 'BALANCE', 'CORTABLE']], 
-                             on='NIC', how='left')
+        if totalizador_sel:
+            nics = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]
+            nics['NIC'] = nics['NIC'].astype(str)
             
-            # Indicadores Rápidos
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Cant. Suministros", len(final))
-            c2.metric("Deuda Total Red", f"${final['BALANCE'].sum():,.2f}")
-            c3.metric("Acción Sugerida", "Operativo de Corte" if final['BALANCE'].sum() > 30000 else "Normal")
-            
-            st.dataframe(final, use_container_width=True)
-        else:
-            st.dataframe(nics_en_totalizador, use_container_width=True)
+            if df_bdg is not None:
+                # Cruce de datos
+                final = pd.merge(nics, df_bdg[['NIC', 'NOMBRE', 'ESTADO', 'BALANCE', 'CORTABLE']], on='NIC', how='left')
+                
+                # MEJORA: Filtros dinámicos para el gerente
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    filtro_estado = st.multiselect("Filtrar por Estado:", final['ESTADO'].unique(), default=final['ESTADO'].unique())
+                with col_f2:
+                    solo_cortables = st.checkbox("Ver solo suministros CORTABLES")
+                
+                # Aplicar filtros
+                final = final[final['ESTADO'].isin(filtro_estado)]
+                if solo_cortables:
+                    final = final[final['CORTABLE'] == 'S'] # Ajustar según tu BDG (S/N o 1/0)
+                
+                st.dataframe(final, use_container_width=True)
+            else:
+                st.dataframe(nics, use_container_width=True)
 
 else:
-    # Esto es lo que sale si NO se ha subido archivo
-    st.warning("⚠️ El sistema está listo. Por favor, cargue el archivo Excel (.xlsx) en el menú lateral para iniciar.")
-    st.image("https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1350&q=80", caption="Análisis de Redes Eléctricas")
+    st.info("👋 PuntoRojo v3.0 está listo. Cargue el archivo de Balance Central para iniciar el análisis.")
