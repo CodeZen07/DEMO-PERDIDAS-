@@ -1,138 +1,100 @@
-import random
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import folium
 from streamlit_folium import st_folium
 
-# ─────────────────────────────────────────────────────────
-# CONFIGURACIÓN DE PÁGINA
-# ─────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="PuntoRojo v3.0 – Gestión Gerencial",
-    page_icon="🔴",
-    layout="wide",
-)
+# 1. CONFIGURACIÓN PROFESIONAL
+st.set_page_config(page_title="PuntoRojo v3.0 | Distrito Nacional", layout="wide", page_icon="🔴")
 
-# ─────────────────────────────────────────────────────────
-# FUNCIONES DE CARGA Y PROCESAMIENTO
-# ─────────────────────────────────────────────────────────
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b; }
+    </style>
+    """, unsafe_allow_html=True)
 
-def leer_balance_ct(xls):
-    """Detecta la fila con 'ITEM' en Balance CT y extrae metadata."""
-    raw = pd.read_excel(xls, sheet_name="Balance CT", header=None, dtype=str)
-    meta = {}
-    header_row = None
-
-    for i, row in raw.iterrows():
-        vals = row.fillna("").astype(str).tolist()
-        for j, v in enumerate(vals):
-            v_up = v.strip().upper()
-            if "TOTALIZADOR:" in v_up and "TOTALIZADOR" not in meta:
-                meta["TOTALIZADOR"] = vals[j + 2] if j + 2 < len(vals) else ""
-            if "SECTOR:" in v_up and "SECTOR" not in meta:
-                meta["SECTOR"] = vals[j + 2] if j + 2 < len(vals) else ""
-            if "CIRCUITO" in v_up and "CIRCUITO" not in meta:
-                meta["CIRCUITO"] = vals[j + 1] if j + 1 < len(vals) else ""
-
-        if "ITEM" in [v.strip().upper() for v in vals]:
-            header_row = i
-            break
-
-    if header_row is None: return meta, None
-
-    df = pd.read_excel(xls, sheet_name="Balance CT", header=header_row)
-    df.columns = [str(c).strip().upper() for c in df.columns]
-    
-    # Limpieza de filas vacías basada en ITEM
-    df = df[pd.to_numeric(df["ITEM"], errors="coerce").notna()]
-    return meta, df.reset_index(drop=True)
-
-def leer_bdg(xls):
-    """Carga la Base de Datos General (BDG)."""
-    sheet = next((s for s in xls.sheet_names if "bdg" in s.lower()), None)
-    if not sheet: return None
-    df = pd.read_excel(xls, sheet_name=sheet)
-    df.columns = [str(c).strip().upper() for c in df.columns]
-    return df
-
-def cruzar_informacion(df_clientes, df_bdg):
-    """Cruce Gerencial: Une datos de la BDG al Balance CT por el NIC."""
-    if df_clientes is not None and df_bdg is not None:
-        # Asegurar que NIC sea string para el cruce
-        df_clientes["NIC"] = df_clientes["NIC"].astype(str)
-        df_bdg["NIC"] = df_bdg["NIC"].astype(str)
-        
-        # Seleccionamos columnas clave de la BDG para el gerente
-        columnas_interes = ["NIC", "ESTADO", "BALANCE", "CORTABLE", "TARIFA"]
-        df_interes = df_bdg[[c for c in columnas_interes if c in df_bdg.columns]]
-        
-        return pd.merge(df_clientes, df_interes, on="NIC", how="left")
-    return df_clientes
-
-# ─────────────────────────────────────────────────────────
-# LÓGICA DE SEMÁFORO
-# ─────────────────────────────────────────────────────────
-
-def semaforo_color(pct):
-    pct = abs(float(pct))
-    if pct > 30: return "red"
-    elif pct >= 15: return "orange"
-    else: return "green"
-
-# ─────────────────────────────────────────────────────────
-# INTERFAZ DE USUARIO (UI)
-# ─────────────────────────────────────────────────────────
-
-st.title("🔴 PuntoRojo v3.0 — Panel de Control Gerencial")
-st.markdown("### Gestión de Pérdidas Eléctricas - Distrito Nacional")
-
-archivo = st.file_uploader("Subir Balance de Totalizadores (.xlsx)", type=["xlsx"])
-
-if archivo:
+# 2. FUNCIONES DE PROCESAMIENTO DE DATOS
+def procesar_datos(archivo):
     xls = pd.ExcelFile(archivo)
     
-    # Carga de datos
-    with st.spinner("Realizando cruce de información..."):
-        meta_ct, df_ct = leer_balance_ct(xls)
-        df_bdg = leer_bdg(xls)
+    # Carga de Balance Central (Pérdidas por Totalizador)
+    df_balance = pd.read_excel(xls, sheet_name="Balance Central")
+    df_balance.columns = [str(c).strip().upper() for c in df_balance.columns]
+    
+    # Carga de BDG (Información de Suministros)
+    sheet_bdg = next((s for s in xls.sheet_names if "bdg" in s.lower()), None)
+    df_bdg = pd.read_excel(xls, sheet_name=sheet_bdg) if sheet_bdg else None
+    if df_bdg is not None:
+        df_bdg.columns = [str(c).strip().upper() for c in df_bdg.columns]
+    
+    # Carga de Relación (Vínculo Totalizador - Suministro)
+    df_relacion = pd.read_excel(xls, sheet_name="Relación")
+    df_relacion.columns = [str(c).strip().upper() for c in df_relacion.columns]
+    
+    return df_balance, df_bdg, df_relacion
+
+# 3. INTERFAZ Y LÓGICA PRINCIPAL
+st.title("🔴 Gestión Estratégica de Pérdidas - PuntoRojo v3.0")
+st.sidebar.header("Configuración de Operaciones")
+
+uploaded_file = st.sidebar.file_uploader("Cargar Balance de Totalizadores (.xlsx)", type="xlsx")
+
+if uploaded_file:
+    df_bal, df_bdg, df_rel = procesar_datos(uploaded_file)
+    
+    # --- FILTRO DISTRITO NACIONAL / SANTO DOMINGO ---
+    # Se asume que existe una columna 'REGIÓN' o 'OFICINA'
+    if 'REGIÓN' in df_bal.columns:
+        df_bal = df_bal[df_bal['REGIÓN'].str.contains("DN|DISTRITO|OCCIDENTAL", case=False, na=False)]
+
+    # --- MÉTRICAS DE PRIORIDAD ---
+    # Ordenar por mayor porcentaje de pérdida
+    df_prioridad = df_bal.sort_values(by='%PÉRDIDA', ascending=False).head(10)
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("⚠️ Top 10 Prioridades de Intervención")
+        st.table(df_prioridad[['TOTALIZADOR', 'CIRCUITO', '%PÉRDIDA', 'COMPRA']])
+
+    with col2:
+        st.subheader("📊 Distribución de Pérdidas por Circuito")
+        fig_pie = px.pie(df_bal, values='PÉRDIDA', names='CIRCUITO', 
+                         title='Localización de Pérdida de Energía',
+                         color_discrete_sequence=px.colors.sequential.Reds_r)
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    # --- MAPA DE CALOR OPERATIVO ---
+    st.subheader("📍 Mapa de Localización: Distrito Nacional y SDE")
+    # Coordenadas base Santo Domingo
+    m = folium.Map(location=[18.4861, -69.9312], zoom_start=12, tiles="cartodbpositron")
+    
+    # Aquí se iteraría sobre df_bal si tuviera lat/lon
+    # Por ahora marcamos la zona de influencia
+    folium.Circle([18.4861, -69.9312], radius=5000, color="red", fill=True, opacity=0.2).add_to(m)
+    st_folium(m, width=1300, height=400)
+
+    # --- FILTRO DINÁMICO DE SUMINISTROS ---
+    st.divider()
+    st.subheader("🔍 Buscador de Suministros por Totalizador")
+    
+    lista_totalizadores = df_bal['TOTALIZADOR'].unique().tolist()
+    totalizador_sel = st.selectbox("Seleccione un Totalizador para ver sus suministros asociados:", lista_totalizadores)
+
+    if totalizador_sel:
+        # Cruce de información: Relación + BDG
+        suministros_asociados = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]
         
-        # Ejecutar el cruce automático
-        df_final = cruzar_informacion(df_ct, df_bdg)
-
-    # TABS PARA ORGANIZACIÓN GERENCIAL
-    tab_resumen, tab_detalles, tab_mapa = st.tabs(["📊 Resumen Ejecutivo", "📋 Detalle de Clientes", "🗺️ Mapa Operativo"])
-
-    with tab_resumen:
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Totalizador", meta_ct.get("TOTALIZADOR", "N/D"))
-        col2.metric("Sector", meta_ct.get("SECTOR", "N/D"))
-        col3.metric("Clientes en CT", len(df_final) if df_final is not None else 0)
-        
-        st.divider()
-        st.info("Utilice las pestañas superiores para profundizar en el análisis de pérdidas.")
-
-    with tab_detalles:
-        st.subheader("Análisis de Suministros (Cruce BDG)")
-        if df_final is not None:
-            # Filtro de búsqueda
-            busqueda = st.text_input("🔍 Buscar por NIC o Nombre")
-            if busqueda:
-                mask = df_final.apply(lambda r: r.astype(str).str.contains(busqueda, case=False)).any(axis=1)
-                df_final = df_final[mask]
-            
-            st.dataframe(df_final, use_container_width=True)
+        if df_bdg is not None:
+            # Cruce con BDG por NIC para traer Balance y Estado
+            suministros_final = pd.merge(suministros_asociados, 
+                                         df_bdg[['NIC', 'ESTADO', 'BALANCE', 'CORTABLE']], 
+                                         on='NIC', how='left')
+            st.write(f"Suministros bajo el Totalizador: **{totalizador_sel}**")
+            st.dataframe(suministros_final, use_container_width=True)
         else:
-            st.error("No se pudo procesar la información de clientes.")
+            st.dataframe(suministros_asociados, use_container_width=True)
 
-    with tab_mapa:
-        st.subheader("Localización de Pérdidas")
-        # Aquí iría la lógica de folium ya definida en tu base anterior
-        st.caption("Mapa configurado para visualización por circuito.")
-        
 else:
-    st.warning("Por favor, suba un archivo para activar el tablero.")
-
-# ─────────────────────────────────────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.write("**Estatus de Sistema:** Operativo")
-st.sidebar.write("**Nivel:** Gerencial")
+    st.info("Esperando carga de archivos para generar el análisis de prioridades.")
