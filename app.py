@@ -274,7 +274,8 @@ with tab2:
 
         # Filtro sector
         if "SECTOR" in df_work.columns:
-            sectores   = ["Todos"] + sorted(df_work["SECTOR"].dropna().unique().tolist())
+            # Convertimos todo a string antes de ordenar para evitar el TypeError
+sectores = ["Todos"] + sorted(df_work["SECTOR"].dropna().astype(str).unique().tolist())
             sector_sel = st.selectbox("Filtrar por Sector", sectores)
             if sector_sel != "Todos":
                 df_work = df_work[df_work["SECTOR"] == sector_sel]
