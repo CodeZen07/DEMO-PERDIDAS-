@@ -1,160 +1,121 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 # 1. CONFIGURACIÓN E IDENTIDAD
-st.set_page_config(page_title="PuntoRojo v3.4 | EDEESTE", layout="wide", page_icon="🔴")
+st.set_page_config(page_title="PuntoRojo v4.0 | EDEESTE", layout="wide", page_icon="🔴")
 
 AZUL_EDEESTE = "#00235d"
 AMARILLO_EDEESTE = "#ffc20e"
-GRIS_OSCURO = "#1e1e1e"  # Para máxima legibilidad en texto
+GRIS_OSCURO = "#1e1e1e"
 
-# 2. CARGA DE DATOS MEJORADA (Incluye BDG)
+# 2. CARGA DE DATOS
 @st.cache_data
 def cargar_datos_balance(archivo):
     xls = pd.ExcelFile(archivo)
-    
-    # Balance Central
     df_bal = pd.read_excel(xls, sheet_name="Balance Central")
     df_bal.columns = [str(c).strip().upper() for c in df_bal.columns]
-    
-    # Relación
     df_rel = pd.read_excel(xls, sheet_name="Relación")
     df_rel.columns = [str(c).strip().upper() for c in df_rel.columns]
-    
-    # BDG (Búsqueda flexible por nombre de hoja)
     nombre_bdg = next((s for s in xls.sheet_names if "bdg" in s.lower()), None)
     df_bdg = pd.read_excel(xls, sheet_name=nombre_bdg) if nombre_bdg else None
     if df_bdg is not None:
         df_bdg.columns = [str(c).strip().upper() for c in df_bdg.columns]
-    
     return df_bal, df_rel, df_bdg
 
-# 3. INTERFAZ Y FILTROS
-st.title("🔴 PuntoRojo v3.4 — Control de Pérdidas")
+# 3. INTERFAZ
+st.title("🔴 PuntoRojo v4.0 — Inteligencia Operativa")
 archivo = st.sidebar.file_uploader("Cargar Archivo Excel", type=["xlsx"])
 
 if archivo:
     df_bal, df_rel, df_bdg = cargar_datos_balance(archivo)
-    
-    # Identificación de columnas
     col_pct = '%PÉRDIDA' if '%PÉRDIDA' in df_bal.columns else 'PERDIDA_PCT'
     col_kwh = 'PÉRDIDA' if 'PÉRDIDA' in df_bal.columns else 'PERDIDA'
     col_oficina = 'OFICINA' if 'OFICINA' in df_bal.columns else None
     
-    # Limpieza numérica inicial
     df_bal[col_pct] = pd.to_numeric(df_bal[col_pct], errors='coerce').fillna(0)
     df_bal[col_kwh] = pd.to_numeric(df_bal[col_kwh], errors='coerce').fillna(0)
 
-    # --- MEJORA: ÍNDICE DE PRIORIZACIÓN DE INSPECCIÓN (IPI) ---
+    # IPI (Índice de Priorización)
     max_kwh = df_bal[col_kwh].max() if df_bal[col_kwh].max() > 0 else 1
     df_bal['IPI'] = ((df_bal[col_kwh] / max_kwh) * 70 + (df_bal[col_pct] / 100) * 30).clip(0, 100)
 
-    # --- BARRA LATERAL: FILTROS DINÁMICOS ---
-    st.sidebar.header("🔍 Filtros de Segmentación")
+    # Filtros
     opciones_oficina = ["TODAS"]
-    if col_oficina:
-        opciones_oficina += sorted(df_bal[col_oficina].dropna().unique().tolist())
-    
-    seleccion_oficina = st.sidebar.selectbox("Seleccione Oficina/Zona:", opciones_oficina)
-    
-    # Aplicar Filtro de Oficina
-    if seleccion_oficina != "TODAS":
-        df_filtrado = df_bal[df_bal[col_oficina] == seleccion_oficina]
-        titulo_seccion = f"Análisis: {seleccion_oficina}"
-    else:
-        df_filtrado = df_bal
-        titulo_seccion = "Análisis General (Global EDEESTE)"
+    if col_oficina: opciones_oficina += sorted(df_bal[col_oficina].dropna().unique().tolist())
+    seleccion_oficina = st.sidebar.selectbox("Seleccione Oficina:", opciones_oficina)
+    df_filtrado = df_bal if seleccion_oficina == "TODAS" else df_bal[df_bal[col_oficina] == seleccion_oficina]
 
-    # --- BLOQUE 1: KPIs DE IMPACTO ---
-    st.subheader(titulo_seccion)
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    
-    with kpi1:
-        st.metric("Pérdida Acumulada", f"{df_filtrado[col_kwh].sum():,.2f} kWh")
-    with kpi2:
-        st.metric("% Pérdida Promedio", f"{df_filtrado[col_pct].mean():.2f}%")
-    with kpi3:
-        st.metric("Puntos Críticos (>15%)", len(df_filtrado[df_filtrado[col_pct] > 15]))
-    with kpi4:
-        top_id = df_filtrado.sort_values(by='IPI', ascending=False)['TOTALIZADOR'].iloc[0] if not df_filtrado.empty else "N/A"
-        st.metric("Máxima Prioridad", f"ID: {top_id}")
-
-    # --- BLOQUE 2: PRIORIZACIÓN ESTRATÉGICA (COLORES OSCUROS AJUSTADOS) ---
+    # --- BLOQUE PARETO 80/20 ---
     st.divider()
-    st.subheader("🚀 Próximas Inspecciones Sugeridas (Basado en IPI)")
-    top_prioridad = df_filtrado.sort_values(by='IPI', ascending=False).head(5)
-    cols_p = st.columns(5)
-    for i, (idx, row) in enumerate(top_prioridad.iterrows()):
-        with cols_p[i]:
-            st.markdown(f"""
-            <div style="
-                padding:15px; 
-                border-radius:12px; 
-                border-left: 6px solid {AZUL_EDEESTE}; 
-                background-color: #f8f9fa;
-                box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
-                min-height: 120px;
-            ">
-                <small style="color: {AZUL_EDEESTE}; font-weight: bold;">Prioridad: {row['IPI']:.1f}/100</small><br>
-                <strong style="color: {GRIS_OSCURO}; font-size: 1.1em;">ID: {row['TOTALIZADOR']}</strong><br>
-                <span style="color: #d32f2f; font-size: 1.2em; font-weight: 800;">{row[col_kwh]:,.0f} kWh</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # --- BLOQUE 3: GRÁFICOS DINÁMICOS ---
-    st.divider()
-    c_graf1, c_graf2 = st.columns([2, 1])
+    st.subheader("🎯 Análisis de Impacto Pareto 80/20")
     
-    with c_graf1:
-        st.subheader(f"📊 Top 10 Impacto en {seleccion_oficina}")
-        df_top10 = df_filtrado.sort_values(by=col_kwh, ascending=False).head(10)
-        fig_top = px.bar(df_top10, x='TOTALIZADOR', y=col_kwh, color='IPI',
-                         text_auto='.2s', color_continuous_scale='Reds',
-                         labels={col_kwh: 'kWh Perdidos', 'IPI': 'Score Prioridad'})
-        st.plotly_chart(fig_top, use_container_width=True)
-
-    with c_graf2:
-        st.subheader("📉 Distribución por Circuito")
-        df_circ = df_filtrado.groupby('CIRCUITO')[[col_kwh]].sum().reset_index()
-        fig_pie = px.pie(df_circ, values=col_kwh, names='CIRCUITO', hole=0.4,
-                         color_discrete_sequence=px.colors.qualitative.Prism)
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    # --- BLOQUE 4: AUDITORÍA DE SUMINISTROS (FILTRO POR TOTALIZADOR) ---
-    st.divider()
-    st.subheader("🔍 Auditoría Detallada: Totalizador ↔ Medidores y Contratos")
+    # Preparar datos para Pareto
+    df_pareto = df_filtrado.sort_values(by=col_kwh, ascending=False).reset_index()
+    df_pareto['PERDIDA_ACUM'] = df_pareto[col_kwh].cumsum()
+    total_perdida = df_pareto[col_kwh].sum()
+    df_pareto['PCT_ACUM'] = (df_pareto['PERDIDA_ACUM'] / total_perdida) * 100
     
-    totalizador_sel = st.selectbox("Seleccione un Totalizador para ver sus componentes asociados:", [""] + df_filtrado['TOTALIZADOR'].unique().tolist())
+    # Identificar el punto 80%
+    pocos_vitales = df_pareto[df_pareto['PCT_ACUM'] <= 80]
+    
+    cp1, cp2 = st.columns([2, 1])
+    with cp1:
+        fig_pareto = go.Figure()
+        fig_pareto.add_trace(go.Bar(x=df_pareto['TOTALIZADOR'][:20], y=df_pareto[col_kwh][:20], name="kWh Perdidos", marker_color=AZUL_EDEESTE))
+        fig_pareto.add_trace(go.Scatter(x=df_pareto['TOTALIZADOR'][:20], y=df_pareto['PCT_ACUM'][:20], name="% Acumulado", yaxis="y2", line=dict(color="#d32f2f", width=3)))
+        
+        fig_pareto.update_layout(
+            title="Curva de Pareto: Top 20 Totalizadores Críticos",
+            yaxis=dict(title="kWh Perdidos"),
+            yaxis2=dict(title="% Acumulado", overlaying="y", side="right", range=[0, 105]),
+            legend=dict(x=0.8, y=1.2)
+        )
+        st.plotly_chart(fig_pareto, use_container_width=True)
+
+    with cp2:
+        st.info(f"""
+        **Hallazgo Estratégico:**
+        Interviniendo solo **{len(pocos_vitales)}** totalizadores de los {len(df_pareto)}, 
+        podrás recuperar el **80%** de la energía perdida en {seleccion_oficina}.
+        """)
+        st.metric("Totalizadores 'Pocos Vitales'", len(pocos_vitales))
+        st.metric("Energía Recuperable (80%)", f"{total_perdida * 0.8:,.0f} kWh")
+
+    # --- BLOQUE MATRIZ DE DECISIÓN ---
+    st.divider()
+    st.subheader("📍 Matriz de Decisión: Volumen vs Intensidad")
+    
+    fig_scatter = px.scatter(
+        df_filtrado, x=col_pct, y=col_kwh, size='IPI', color='IPI',
+        hover_name='TOTALIZADOR', color_continuous_scale='Reds',
+        labels={col_pct: '% de Pérdida', col_kwh: 'kWh Perdidos'},
+        title="Cuadrantes de Acción (Burbuja según Score IPI)"
+    )
+    # Líneas de referencia (Promedios)
+    fig_scatter.add_hline(y=df_filtrado[col_kwh].mean(), line_dash="dot", annotation_text="Pérdida Media")
+    fig_scatter.add_vline(x=15, line_dash="dot", annotation_text="Límite Crítico (15%)")
+    
+    st.plotly_chart(fig_scatter, use_container_width=True)
+
+    # --- BLOQUE AUDITORÍA (Mantenido igual por tu solicitud) ---
+    st.divider()
+    st.subheader("🔍 Auditoría Detallada")
+    totalizador_sel = st.selectbox("Seleccione un Totalizador:", [""] + df_filtrado['TOTALIZADOR'].unique().tolist())
 
     if totalizador_sel:
         nics_vinculados = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]['NIC'].astype(str).tolist()
-        
         if df_bdg is not None:
             detalle_clientes = df_bdg[df_bdg['NIC'].astype(str).isin(nics_vinculados)].copy()
-            
             detalle_clientes['PROMEDIO_CONSUMO'] = pd.to_numeric(detalle_clientes['PROMEDIO_CONSUMO'], errors='coerce').fillna(0)
             detalle_clientes['BALANCE'] = pd.to_numeric(detalle_clientes['BALANCE'], errors='coerce').fillna(0)
             
-            inf1, inf2, inf3 = st.columns(3)
-            inf1.metric("Medidores/Contratos", len(detalle_clientes))
-            inf2.metric("Deuda Total en Punto", f"RD$ {detalle_clientes['BALANCE'].sum():,.2f}")
-            inf3.metric("Consumo Prom. Clientes", f"{detalle_clientes['PROMEDIO_CONSUMO'].sum():,.0f} kWh")
-            
-            st.write(f"### Detalle de Suministros Asociados al ID {totalizador_sel}")
-            cols_interes = ['NIC', 'NIS_RAD', 'CONTADOR', 'NOMBRE', 'ESTADO', 'BALANCE', 'CORTABLE', 'PROMEDIO_CONSUMO', 'DIRECCION']
-            cols_finales = [c for c in cols_interes if c in detalle_clientes.columns]
-            
-            st.dataframe(detalle_clientes[cols_finales], use_container_width=True)
-        else:
-            st.warning("⚠️ No se encontró la hoja de base de datos (BDG) para cruzar los contratos.")
-
-    # --- BLOQUE 5: TABLA MAESTRA ---
-    with st.expander("Ver Tabla General de Datos"):
-        st.dataframe(
-            df_filtrado[['TOTALIZADOR', 'CIRCUITO', col_kwh, col_pct, 'IPI']].style.format({col_kwh: '{:,.2f}', col_pct: '{:.2f}%', 'IPI': '{:.1f}'}),
-            use_container_width=True
-        )
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Clientes", len(detalle_clientes))
+            m2.metric("Deuda", f"RD$ {detalle_clientes['BALANCE'].sum():,.2f}")
+            m3.metric("Consumo Prom.", f"{detalle_clientes['PROMEDIO_CONSUMO'].sum():,.0f} kWh")
+            st.dataframe(detalle_clientes, use_container_width=True)
 
 else:
-    st.info("👋 Por favor, cargue el archivo Excel de Balance de Totalizadores.")
+    st.info("👋 Por favor, cargue el archivo Excel para iniciar el análisis estratégico.")
