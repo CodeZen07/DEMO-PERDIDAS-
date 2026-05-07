@@ -7,6 +7,7 @@ st.set_page_config(page_title="PuntoRojo v3.4 | EDEESTE", layout="wide", page_ic
 
 AZUL_EDEESTE = "#00235d"
 AMARILLO_EDEESTE = "#ffc20e"
+GRIS_OSCURO = "#1e1e1e"  # Para máxima legibilidad en texto
 
 # 2. CARGA DE DATOS MEJORADA (Incluye BDG)
 @st.cache_data
@@ -79,7 +80,7 @@ if archivo:
         top_id = df_filtrado.sort_values(by='IPI', ascending=False)['TOTALIZADOR'].iloc[0] if not df_filtrado.empty else "N/A"
         st.metric("Máxima Prioridad", f"ID: {top_id}")
 
-    # --- BLOQUE 2: PRIORIZACIÓN ESTRATÉGICA ---
+    # --- BLOQUE 2: PRIORIZACIÓN ESTRATÉGICA (COLORES OSCUROS AJUSTADOS) ---
     st.divider()
     st.subheader("🚀 Próximas Inspecciones Sugeridas (Basado en IPI)")
     top_prioridad = df_filtrado.sort_values(by='IPI', ascending=False).head(5)
@@ -87,10 +88,17 @@ if archivo:
     for i, (idx, row) in enumerate(top_prioridad.iterrows()):
         with cols_p[i]:
             st.markdown(f"""
-            <div style="padding:10px; border-radius:10px; border-left: 5px solid #d32f2f; background-color:white;">
-                <small>Prioridad: {row['IPI']:.1f}/100</small><br>
-                <strong>ID: {row['TOTALIZADOR']}</strong><br>
-                <span style="color:#d32f2f;">{row[col_kwh]:,.0f} kWh</span>
+            <div style="
+                padding:15px; 
+                border-radius:12px; 
+                border-left: 6px solid {AZUL_EDEESTE}; 
+                background-color: #f8f9fa;
+                box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
+                min-height: 120px;
+            ">
+                <small style="color: {AZUL_EDEESTE}; font-weight: bold;">Prioridad: {row['IPI']:.1f}/100</small><br>
+                <strong style="color: {GRIS_OSCURO}; font-size: 1.1em;">ID: {row['TOTALIZADOR']}</strong><br>
+                <span style="color: #d32f2f; font-size: 1.2em; font-weight: 800;">{row[col_kwh]:,.0f} kWh</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -120,25 +128,20 @@ if archivo:
     totalizador_sel = st.selectbox("Seleccione un Totalizador para ver sus componentes asociados:", [""] + df_filtrado['TOTALIZADOR'].unique().tolist())
 
     if totalizador_sel:
-        # 1. Obtener los NICs vinculados a través de la hoja 'Relación'
         nics_vinculados = df_rel[df_rel['TOTALIZADOR'].astype(str) == str(totalizador_sel)]['NIC'].astype(str).tolist()
         
         if df_bdg is not None:
-            # 2. Filtrar BDG y aplicar limpieza para evitar el TypeError
             detalle_clientes = df_bdg[df_bdg['NIC'].astype(str).isin(nics_vinculados)].copy()
             
-            # Limpieza de datos críticos para evitar errores de suma
             detalle_clientes['PROMEDIO_CONSUMO'] = pd.to_numeric(detalle_clientes['PROMEDIO_CONSUMO'], errors='coerce').fillna(0)
             detalle_clientes['BALANCE'] = pd.to_numeric(detalle_clientes['BALANCE'], errors='coerce').fillna(0)
             
-            # Métricas del totalizador seleccionado
             inf1, inf2, inf3 = st.columns(3)
             inf1.metric("Medidores/Contratos", len(detalle_clientes))
             inf2.metric("Deuda Total en Punto", f"RD$ {detalle_clientes['BALANCE'].sum():,.2f}")
             inf3.metric("Consumo Prom. Clientes", f"{detalle_clientes['PROMEDIO_CONSUMO'].sum():,.0f} kWh")
             
             st.write(f"### Detalle de Suministros Asociados al ID {totalizador_sel}")
-            # Columnas de interés (Medidores, NICs, Contratos)
             cols_interes = ['NIC', 'NIS_RAD', 'CONTADOR', 'NOMBRE', 'ESTADO', 'BALANCE', 'CORTABLE', 'PROMEDIO_CONSUMO', 'DIRECCION']
             cols_finales = [c for c in cols_interes if c in detalle_clientes.columns]
             
